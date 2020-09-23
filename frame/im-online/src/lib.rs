@@ -248,6 +248,8 @@ pub trait Trait: SendTransactionTypes<Call<Self>> + pallet_session::historical::
 	/// The overarching event type.
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
+	type ValidatorId: Member + Parameter;
+
 	/// An expected duration of the session.
 	///
 	/// This parameter is used to determine the longevity of `heartbeat` transaction
@@ -259,7 +261,7 @@ pub trait Trait: SendTransactionTypes<Call<Self>> + pallet_session::historical::
 	type SessionInterface: SessionInterface;
 
 	/// A set of validators expected to be online.
-	type ValidatorSet: ValidatorSet<<Self as pallet_session::Trait>::ValidatorId>;
+	type ValidatorSet: ValidatorSet<<Self as Trait>::ValidatorId>;
 
 	/// A type that gives us the ability to submit unresponsiveness offence reports.
 	type ReportUnresponsiveness:
@@ -312,10 +314,10 @@ decl_storage! {
 			double_map hasher(twox_64_concat) SessionIndex, hasher(twox_64_concat) AuthIndex
 			=> Option<Vec<u8>>;
 
-		/// For each session index, we keep a mapping of `T::ValidatorId` to the
+		/// For each session index, we keep a mapping of `<T as Trait>::ValidatorId` to the
 		/// number of blocks authored by the given authority.
 		AuthoredBlocks get(fn authored_blocks):
-			double_map hasher(twox_64_concat) SessionIndex, hasher(twox_64_concat) T::ValidatorId
+			double_map hasher(twox_64_concat) SessionIndex, hasher(twox_64_concat) <T as Trait>::ValidatorId
 			=> u32;
 	}
 	add_extra_genesis {
@@ -416,12 +418,12 @@ type OffchainResult<T, A> = Result<A, OffchainErr<<T as frame_system::Trait>::Bl
 
 /// Keep track of number of authored blocks per authority, uncles are counted as
 /// well since they're a valid proof of being online.
-impl<T: Trait + pallet_authorship::Trait> pallet_authorship::EventHandler<T::ValidatorId, T::BlockNumber> for Module<T> {
-	fn note_author(author: T::ValidatorId) {
+impl<T: Trait + pallet_authorship::Trait> pallet_authorship::EventHandler<<T as Trait>::ValidatorId, T::BlockNumber> for Module<T> {
+	fn note_author(author: <T as Trait>::ValidatorId) {
 		Self::note_authorship(author);
 	}
 
-	fn note_uncle(author: T::ValidatorId, _age: T::BlockNumber) {
+	fn note_uncle(author: <T as Trait>::ValidatorId, _age: T::BlockNumber) {
 		Self::note_authorship(author);
 	}
 }
@@ -443,7 +445,7 @@ impl<T: Trait> Module<T> {
 		Self::is_online_aux(authority_index, authority)
 	}
 
-	fn is_online_aux(authority_index: AuthIndex, authority: &T::ValidatorId) -> bool {
+	fn is_online_aux(authority_index: AuthIndex, authority: &<T as Trait>::ValidatorId) -> bool {
 		let current_session = T::SessionInterface::current_index();
 
 		<ReceivedHeartbeats>::contains_key(&current_session, &authority_index) ||
@@ -461,7 +463,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Note that the given authority has authored a block in the current session.
-	fn note_authorship(author: T::ValidatorId) {
+	fn note_authorship(author: <T as Trait>::ValidatorId) {
 		let current_session = T::SessionInterface::current_index();
 
 		<AuthoredBlocks<T>>::mutate(
