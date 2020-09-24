@@ -79,7 +79,8 @@ use codec::{Encode, Decode};
 use sp_core::offchain::OpaqueNetworkState;
 use sp_std::prelude::*;
 use sp_std::convert::TryInto;
-use pallet_session::historical::IdentificationTuple;
+use sp_session::ValidatorIdentification;
+// use pallet_session::historical::IdentificationTuple;
 use sp_runtime::{
 	offchain::storage::StorageValueRef,
 	RuntimeDebug,
@@ -241,14 +242,14 @@ pub trait SessionInterface {
 	fn current_index() -> SessionIndex;
 }
 
-pub trait Trait: SendTransactionTypes<Call<Self>> + pallet_session::historical::Trait {
+pub type IdentificationTuple<AccountId, T> = (<T as ValidatorIdentification<AccountId>>::ValidatorId, <T as ValidatorIdentification<AccountId>>::FullIdentification);
+
+pub trait Trait: SendTransactionTypes<Call<Self>> + ValidatorIdentification<<Self as frame_system::Trait>::AccountId> + frame_system::Trait {
 	/// The identifier type for an authority.
 	type AuthorityId: Member + Parameter + RuntimeAppPublic + Default + Ord;
 
 	/// The overarching event type.
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
-
-	type ValidatorId: Member + Parameter;
 
 	/// An expected duration of the session.
 	///
@@ -261,14 +262,14 @@ pub trait Trait: SendTransactionTypes<Call<Self>> + pallet_session::historical::
 	type SessionInterface: SessionInterface;
 
 	/// A set of validators expected to be online.
-	type ValidatorSet: ValidatorSet<<Self as Trait>::ValidatorId>;
+	type ValidatorSet: ValidatorSet<<Self as ValidatorIdentification<<Self as frame_system::Trait>::AccountId>>::ValidatorId>;
 
 	/// A type that gives us the ability to submit unresponsiveness offence reports.
 	type ReportUnresponsiveness:
 		ReportOffence<
 			Self::AccountId,
-			IdentificationTuple<Self>,
-			UnresponsivenessOffence<IdentificationTuple<Self>>,
+			IdentificationTuple<<Self as frame_system::Trait>::AccountId, Self>,
+			UnresponsivenessOffence<IdentificationTuple<<Self as frame_system::Trait>::AccountId, Self>>,
 		>;
 
 	/// A configuration for base priority of unsigned transactions.
@@ -284,7 +285,7 @@ pub trait Trait: SendTransactionTypes<Call<Self>> + pallet_session::historical::
 decl_event!(
 	pub enum Event<T> where
 		<T as Trait>::AuthorityId,
-		IdentificationTuple = IdentificationTuple<T>,
+		IdentificationTuple = IdentificationTuple<<T as frame_system::Trait>::AccountId, T>,
 	{
 		/// A new heartbeat was received from `AuthorityId` \[authority_id\]
 		HeartbeatReceived(AuthorityId),
@@ -317,7 +318,7 @@ decl_storage! {
 		/// For each session index, we keep a mapping of `<T as Trait>::ValidatorId` to the
 		/// number of blocks authored by the given authority.
 		AuthoredBlocks get(fn authored_blocks):
-			double_map hasher(twox_64_concat) SessionIndex, hasher(twox_64_concat) <T as Trait>::ValidatorId
+			double_map hasher(twox_64_concat) SessionIndex, hasher(twox_64_concat) <T as ValidatorIdentification<T::AccountId>>::ValidatorId
 			=> u32;
 	}
 	add_extra_genesis {
@@ -418,12 +419,12 @@ type OffchainResult<T, A> = Result<A, OffchainErr<<T as frame_system::Trait>::Bl
 
 /// Keep track of number of authored blocks per authority, uncles are counted as
 /// well since they're a valid proof of being online.
-impl<T: Trait + pallet_authorship::Trait> pallet_authorship::EventHandler<<T as Trait>::ValidatorId, T::BlockNumber> for Module<T> {
-	fn note_author(author: <T as Trait>::ValidatorId) {
+impl<T: Trait + pallet_authorship::Trait> pallet_authorship::EventHandler<<T as ValidatorIdentification<T::AccountId>>::ValidatorId, T::BlockNumber> for Module<T> {
+	fn note_author(author: <T as ValidatorIdentification<T::AccountId>>::ValidatorId) {
 		Self::note_authorship(author);
 	}
 
-	fn note_uncle(author: <T as Trait>::ValidatorId, _age: T::BlockNumber) {
+	fn note_uncle(author: <T as ValidatorIdentification<T::AccountId>>::ValidatorId, _age: T::BlockNumber) {
 		Self::note_authorship(author);
 	}
 }
@@ -445,7 +446,7 @@ impl<T: Trait> Module<T> {
 		Self::is_online_aux(authority_index, authority)
 	}
 
-	fn is_online_aux(authority_index: AuthIndex, authority: &<T as Trait>::ValidatorId) -> bool {
+	fn is_online_aux(authority_index: AuthIndex, authority: &<T as ValidatorIdentification<T::AccountId>>::ValidatorId) -> bool {
 		let current_session = T::SessionInterface::current_index();
 
 		<ReceivedHeartbeats>::contains_key(&current_session, &authority_index) ||
@@ -463,7 +464,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Note that the given authority has authored a block in the current session.
-	fn note_authorship(author: <T as Trait>::ValidatorId) {
+	fn note_authorship(author: <T as ValidatorIdentification<T::AccountId>>::ValidatorId) {
 		let current_session = T::SessionInterface::current_index();
 
 		<AuthoredBlocks<T>>::mutate(
@@ -668,8 +669,8 @@ impl<T: Trait> pallet_session::OneSessionHandler<T::AccountId> for Module<T> {
 			.filter(|(index, id)|
 				!Self::is_online_aux(*index as u32, id)
 			).filter_map(|(_, id)|
-				T::FullIdentificationOf::convert(id.clone()).map(|full_id| (id, full_id))
-			).collect::<Vec<IdentificationTuple<T>>>();
+				<T as ValidatorIdentification<T::AccountId>>::FullIdentificationOf::convert(id.clone()).map(|full_id| (id, full_id))
+			).collect::<Vec<IdentificationTuple<T::AccountId, T>>>();
 
 		// Remove all received heartbeats and number of authored blocks from the
 		// current session, they have already been processed and won't be needed
